@@ -2,9 +2,6 @@
 
 PackMount is a Dockerized dark-glass web GUI for mounting archive folders through `rar2fs`, adding local/SMB/NFS sources, and re-sharing the mounted unpacked view over SMB or NFS.
 
-<img width="1672" height="941" alt="PackMount" src="https://github.com/user-attachments/assets/d566ba7d-d977-43c5-bde8-94b67e8cb8f2" />
-
-
 The application includes:
 
 - Login-protected web UI on `http://localhost:8080`
