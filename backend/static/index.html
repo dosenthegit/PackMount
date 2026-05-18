@@ -1,0 +1,131 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>PackMount</title>
+    <link rel="stylesheet" href="/static/styles.css" />
+  </head>
+  <body>
+    <div class="app-shell">
+      <aside class="sidebar glass-panel">
+        <div class="brand">
+          <div class="brand-logo" aria-hidden="true"><span></span><span></span><span></span></div>
+          <h1>PackMount</h1>
+        </div>
+        <nav class="nav-list" aria-label="Primary navigation">
+          <button class="nav-item active" data-section="overview"><span class="icon">⌂</span><span>Overview</span></button>
+          <button class="nav-item" data-section="sources"><span class="icon">▣</span><span>Sources</span></button>
+          <button class="nav-item" data-section="mounts"><span class="icon">▤</span><span>Mounts</span></button>
+          <button class="nav-item" data-section="shares"><span class="icon">⌯</span><span>Shares</span></button>
+          <button class="nav-item" data-section="settings"><span class="icon">⚙</span><span>Settings</span></button>
+          <button class="nav-item" data-section="logs"><span class="icon">☷</span><span>Logs</span></button>
+        </nav>
+        <div class="side-status glass-card">
+          <div><span class="status-dot"></span><strong>Docker: Active</strong></div>
+          <span id="sideVersion">Version 1.2.3</span>
+        </div>
+      </aside>
+      <main class="main">
+        <header class="topbar">
+          <div class="window-dots" aria-hidden="true"><span></span><span></span><span></span></div>
+          <div class="top-actions">
+            <button class="status-pill" type="button"><span class="status-dot"></span>Docker: Active</button>
+            <button class="round-button" id="refreshBtn" title="Refresh" type="button">↻</button>
+            <button class="round-button" id="logoutBtn" title="Log out" type="button">?</button>
+          </div>
+        </header>
+        <section class="dashboard-grid">
+          <form class="panel glass-panel source-panel" id="mountForm">
+            <div class="panel-title"><span class="step">1</span><h2>Add source</h2></div>
+            <label class="field-label">Source type</label>
+            <div class="segmented source-tabs" role="tablist">
+              <button type="button" class="seg active" data-source="local">▣ Local folder</button>
+              <button type="button" class="seg" data-source="smb">▤ SMB</button>
+              <button type="button" class="seg" data-source="nfs">⌯ NFS</button>
+            </div>
+            <label class="field-label" for="sourcePath">Path / Server</label>
+            <div class="input-row">
+              <input id="sourcePath" name="sourcePath" value="/data/archive" autocomplete="off" />
+              <button type="button" class="secondary-btn" id="browseBtn">▣ Browse</button>
+            </div>
+            <label class="field-label" for="sourceUsername">Username</label>
+            <input id="sourceUsername" name="sourceUsername" placeholder="archiveuser" autocomplete="username" />
+            <label class="field-label" for="sourcePassword">Password</label>
+            <div class="password-wrap">
+              <input id="sourcePassword" name="sourcePassword" type="password" placeholder="Password" autocomplete="current-password" />
+              <button type="button" id="toggleSourcePassword" aria-label="Show password">◉</button>
+            </div>
+          </form>
+          <form class="panel glass-panel mount-settings" id="mountSettingsForm">
+            <div class="panel-title"><span class="step">2</span><h2>Mount settings</h2></div>
+            <label class="field-label" for="mountTo">Mount to</label>
+            <input id="mountTo" name="mountTo" value="/mnt/packmount/archive" autocomplete="off" />
+            <label class="field-label" for="mountName">Mount name</label>
+            <input id="mountName" name="mountName" value="Archive 1" autocomplete="off" />
+            <div class="toggle-row"><span>Automount</span><label class="switch"><input id="automount" type="checkbox" checked /><span></span></label></div>
+            <div class="toggle-row"><span>Read-only</span><label class="switch"><input id="readOnly" type="checkbox" /><span></span></label></div>
+            <button type="submit" class="primary-btn mount-button">Mount</button>
+          </form>
+          <section class="panel glass-panel active-mounts">
+            <div class="panel-title"><span class="step">3</span><h2>Active mounts</h2></div>
+            <div class="table" id="mountTable">
+              <div class="table-header"><span>Source</span><span>Mountpoint</span><span>Status</span><span>Actions</span></div>
+              <div id="mountRows" class="table-body"></div>
+            </div>
+          </section>
+          <section class="panel glass-panel share-panel">
+            <div class="panel-title"><span class="step">4</span><h2>Share unpacked folder</h2></div>
+            <div class="segmented share-tabs" role="tablist">
+              <button type="button" class="seg active" data-share="smb">SMB share</button>
+              <button type="button" class="seg" data-share="nfs">NFS share</button>
+            </div>
+            <label class="field-label" for="shareName">Share name</label>
+            <input id="shareName" value="Archive-share" autocomplete="off" />
+            <label class="field-label" for="sharePath">Path</label>
+            <input id="sharePath" value="/mnt/packmount/archive" autocomplete="off" />
+            <label class="field-label" for="permission">Permission</label>
+            <select id="permission"><option value="rw">Read/write</option><option value="ro">Read-only</option></select>
+            <label class="field-label" for="allowedClients">Allowed clients</label>
+            <input id="allowedClients" placeholder="* or 192.168.1.0/24" autocomplete="off" />
+            <div class="toggle-row compact"><span>Allow guest</span><label class="switch"><input id="allowGuest" type="checkbox" /><span></span></label><small>ⓘ</small></div>
+            <div class="toggle-row compact"><span>Allow network</span><label class="switch"><input id="allowNetwork" type="checkbox" checked /><span></span></label><small>ⓘ</small></div>
+            <button class="primary-btn full" id="enableShareBtn" type="button">Enable sharing</button>
+            <div class="share-list" id="shareList"></div>
+          </section>
+          <section class="panel glass-panel status-panel">
+            <div class="panel-title status-title"><span class="step">5</span><h2>Status / Overview</h2><button type="button" id="viewLogsBtn">View all logs →</button></div>
+            <div class="status-content">
+              <div class="metric glass-card"><div class="metric-icon">▣</div><div><span>Mounted folders</span><strong id="mountedCount">0</strong><p><span class="status-dot"></span>All systems operational</p></div></div>
+              <div class="metric glass-card"><div class="metric-icon purple">⌯</div><div><span>Active shares</span><strong id="shareCount">0</strong><p><span class="status-dot"></span><span id="shareBreakdown">0 SMB, 0 NFS</span></p></div></div>
+              <div class="activity glass-card"><h3>Latest activity</h3><div id="activityList"></div></div>
+            </div>
+          </section>
+        </section>
+      </main>
+    </div>
+    <div class="modal-backdrop" id="loginBackdrop">
+      <form class="login-modal glass-panel" id="loginForm">
+        <button type="button" class="modal-close" aria-label="Close">×</button>
+        <h2>Log in</h2>
+        <label class="field-label" for="loginUsername">Username</label>
+        <div class="input-icon"><span>♙</span><input id="loginUsername" value="admin" autocomplete="username" /></div>
+        <label class="field-label" for="loginPassword">Password</label>
+        <div class="input-icon"><span>▣</span><input id="loginPassword" type="password" value="change-me-now" autocomplete="current-password" /></div>
+        <label class="remember"><input id="rememberMe" type="checkbox" checked /> Remember me</label>
+        <button class="primary-btn full" type="submit">Log in</button>
+      </form>
+    </div>
+    <div class="modal-backdrop hidden" id="pathBackdrop">
+      <div class="path-modal glass-panel">
+        <div class="path-head"><h2>Choose local folder</h2><button type="button" class="modal-close" id="closePathBtn" aria-label="Close">×</button></div>
+        <div class="root-list" id="rootList"></div>
+        <div class="path-current" id="pathCurrent">/data</div>
+        <div class="path-actions"><button type="button" class="secondary-btn" id="pathUpBtn">Back</button><button type="button" class="primary-btn" id="selectPathBtn">Select this folder</button></div>
+        <div class="directory-list" id="directoryList"></div>
+      </div>
+    </div>
+    <div class="toast" id="toast" role="status" aria-live="polite"></div>
+    <script src="/static/app.js"></script>
+  </body>
+</html>
