@@ -8,10 +8,13 @@ if ! grep -q '^user_allow_other' /etc/fuse.conf 2>/dev/null; then
   echo 'user_allow_other' >> /etc/fuse.conf || true
 fi
 
-SAMBA_USER="${PACKMOUNT_SAMBA_USER:-packmount}"
-SAMBA_PASSWORD="${PACKMOUNT_SAMBA_PASSWORD:?Set PACKMOUNT_SAMBA_PASSWORD in .env}"
+SAMBA_USER="${PACKMOUNT_SMB_USER:-${PACKMOUNT_SAMBA_USER:-packmount}}"
+SAMBA_PASSWORD="${PACKMOUNT_SMB_PASSWORD:-${PACKMOUNT_SAMBA_PASSWORD:-}}"
+if [ -z "$SAMBA_PASSWORD" ]; then
+  echo "ERROR: Set PACKMOUNT_SMB_PASSWORD in .env" >&2; exit 1
+fi
 if [ "$SAMBA_PASSWORD" = "packmount" ] || [ "$SAMBA_PASSWORD" = "REPLACE_WITH_DIFFERENT_STRONG_PASSWORD" ]; then
-  echo "ERROR: Set a strong PACKMOUNT_SAMBA_PASSWORD" >&2; exit 1
+  echo "ERROR: Set a strong PACKMOUNT_SMB_PASSWORD" >&2; exit 1
 fi
 if ! id "$SAMBA_USER" >/dev/null 2>&1; then
   useradd -M -s /usr/sbin/nologin "$SAMBA_USER" || true

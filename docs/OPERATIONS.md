@@ -67,3 +67,15 @@ docker compose up -d --build
 ```
 
 Do not extract a backup over a running SQLite database. Restoring an older DB discards any state changes made after backup.
+
+## Deploy and update from Docker Hub or GHCR
+
+Use `docker-compose.ghcr.yml` with `PACKMOUNT_IMAGE=dosenthegit/packmount:latest` (or `ghcr.io/dosenthegit/packmount:latest`) in `.env`. Preserve the entire `/config` host bind directory, particularly `fernet.key`. Backup first as described above; then:
+
+```bash
+docker compose -f docker-compose.ghcr.yml pull
+docker compose -f docker-compose.ghcr.yml up -d --no-build
+docker compose -f docker-compose.ghcr.yml ps
+```
+
+The `rshared` host mount setup must be in place before startup and persist after reboot. Do not use `docker compose up -d --build` with the published-image file. Check SMB and NFS access after upgrading.

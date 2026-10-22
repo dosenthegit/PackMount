@@ -11,27 +11,50 @@ PackMount is a Linux/Docker web UI for presenting RAR archive contents with `rar
 - **Ports:** TCP 8080 for UI; TCP 139/445 for SMB; TCP/UDP 111, 2049, 20048 for NFSv3-style services. Expose only the services you need, and firewall access to trusted subnets. Note that NFS kernel services and port publishing may depend on host configuration.
 - Compose uses Docker bridge networking. FUSE propagation and kernel NFS export accessibility can differ by host; **NFS exports are not guaranteed to work behind Docker bridge/NAT**. For NFS production deployment, verify the host kernel, network topology and firewall before use.
 
-## Installation
+## Installation (build from GitHub source)
+
+Run on a **Linux Docker host** (not Docker Desktop). Install Git, Docker Engine and Docker Compose v2 first. Check that `/dev/fuse` exists. The host must support the applicable CIFS/NFS/FUSE kernel features.
 
 ```bash
-git clone <YOUR-REPOSITORY-URL> packmount
+git clone https://github.com/dosenthegit/PackMount.git packmount
 cd packmount
 cp .env.example .env
-# Use distinct, strong values for PACKMOUNT_PASSWORD and PACKMOUNT_SMB_PASSWORD
 nano .env
+# Set distinct, strong PACKMOUNT_PASSWORD and PACKMOUNT_SMB_PASSWORD.
 mkdir -p config data mounts
-# Mount propagation is important for visibility of FUSE mounts on the host.
+
+# rshared propagation: make each path a mountpoint before setting propagation.
+# Only run this after reviewing mounts on the host.
+sudo mount --bind "$(pwd)/mounts" "$(pwd)/mounts"
 sudo mount --make-rshared "$(pwd)/mounts"
+sudo mount --bind "$(pwd)/data" "$(pwd)/data"
 sudo mount --make-rshared "$(pwd)/data"
+findmnt -T "$(pwd)/mounts" -o TARGET,PROPAGATION
+findmnt -T "$(pwd)/data" -o TARGET,PROPAGATION
+
 docker compose config
 docker compose up -d --build
 docker compose ps
 curl -fsS http://127.0.0.1:8080/api/health
 ```
 
-The `mount --make-rshared` command may fail if the directory is not a separate mount point. On many Linux distributions first make the directories bind mount points (`sudo mount --bind mounts mounts` and `sudo mount --bind data data`) then mark them rshared. These host mount settings need to persist after reboot; see [Operations guide](docs/OPERATIONS.md). If propagation is not set up, mounting may work **inside** the container while the host cannot see the mounted view.
+For mount propagation, **these bind mounts are not persistent across reboot**. Arrange persistent mount points/propagation as described in [Operations guide](docs/OPERATIONS.md) before relying on automatic restart. Avoid blindly adding duplicate bind mounts if these paths are already dedicated shared mounts. The container needs the host's `/dev/fuse`, and ports 8080/139/445/111/2049/20048 must not conflict with other services. NFS exports may not work through Docker bridge networking on every host. Restrict the management UI and file-sharing ports with the host firewall.
 
-Open `http://HOST_IP:8080` and sign in using `.env` values. Keep the host firewall restricted to trusted networks, ideally use a TLS reverse proxy and `PACKMOUNT_SECURE_COOKIE=true`.
+Open `http://HOST_IP:8080` and sign in using the credentials set in `.env`. If behind an HTTPS reverse proxy, set `PACKMOUNT_SECURE_COOKIE=true` and test the login flow.
+
+### Install using a published image instead of building locally
+
+After cloning, preparing `.env`, making the directories and arranging mount propagation as above, set `PACKMOUNT_IMAGE=dosenthegit/packmount:latest` in `.env` (or use `ghcr.io/dosenthegit/packmount:latest`). Then:
+
+```bash
+docker compose -f docker-compose.ghcr.yml config
+docker compose -f docker-compose.ghcr.yml pull
+docker compose -f docker-compose.ghcr.yml up -d --no-build
+docker compose -f docker-compose.ghcr.yml ps
+curl -fsS http://127.0.0.1:8080/api/health
+```
+
+Docker Hub images are public only if their repository is public; GHCR images also require **public package visibility** or a login with read permission. Prefer a numbered release tag for reproducibility, rather than `latest`.
 
 ## Add an archive source
 
@@ -82,33 +105,52 @@ See [Operations guide](docs/OPERATIONS.md) and [Changes](CHANGELOG.md).
 
 The container needs elevated privileges and cannot sandbox malicious paths as strongly as an unprivileged service. Local source and export configuration should only be given to trusted admins. `rar2fs` doesn't manage encrypted archive passwords in the UI. Passwords for remote SMB mounts are encrypted in SQLite, but the Fernet key is **stored in `/config` on the same host**; secure and back up that directory. This release is statically validated but **not integration-tested with actual FUSE/NFS/SMB mounts in Docker**.
 
-## GitHub Actions: build and publish to GHCR
+## GitHub Actions: publish to Docker Hub and GHCR
 
-This repository includes `.github/workflows/docker-publish.yml`.
+Workflow path: `.github/workflows/docker-publish.yml`. It builds `linux/amd64` once and pushes the generated tags to **both** registries:
 
-1. Commit/push all project files **including the hidden `.github` directory** to the `main` branch.
-2. In GitHub, go to **Settings → Actions → General → Workflow permissions**. The workflow requests `contents: read` and `packages: write`; organization policy must allow package publication. It uses the automatic `GITHUB_TOKEN` (no personal access token required).
-3. Go to **Actions → Build and publish Docker images → Run workflow → main → Run workflow**. A push to `main` also runs it automatically. A push of a version tag such as `v1.3.0` produces versioned image tags.
-4. After success, find the image in **Packages**; the default is `ghcr.io/OWNER/REPO:latest` (both owner and repository lowercased). It builds **linux/amd64** only; ARM hosts are not supported by this pipeline.
-5. The package may initially be private. Set its visibility in GitHub package settings to public if you need unauthenticated pulling; otherwise run `docker login ghcr.io` with a token that can read packages on the deployment host.
+- Docker Hub: `dosenthegit/packmount:latest`
+- GitHub Container Registry: `ghcr.io/dosenthegit/packmount:latest`
+
+### Required one-time setup
+
+1. On [Docker Hub](https://hub.docker.com/), sign into the `dosenthegit` account and create a repository named `packmount`, or ensure that account can publish to `dosenthegit/packmount`. Create a Docker Hub **access token with write permissions**; do not use your password.
+2. On GitHub, open `https://github.com/dosenthegit/PackMount/settings/secrets/actions` and create two **Repository secrets**: `DOCKERHUB_USERNAME` = `dosenthegit` and `DOCKERHUB_TOKEN` = your Docker Hub access token.
+3. Under GitHub **Settings → Actions → General → Workflow permissions**, ensure the workflow can publish packages; `.github/workflows/docker-publish.yml` explicitly requests `contents: read` and `packages: write`. The GHCR login uses the automatic `GITHUB_TOKEN`; no extra GHCR personal token is required.
+4. Commit/push all files, including the hidden `.github` folder, to `main`. **Push to main triggers publication automatically**, or use **Actions → Build and publish Docker images → Run workflow → main**.
+5. In Docker Hub and GHCR, configure public visibility if you need anonymous pulls. Check that the workflow has succeeded and both published images appear before deploying.
+
+### Image tags
+
+- Push to `main`: `latest` plus an immutable-looking `sha-...` tag (a tag can still be overwritten by privileged users).
+- Push the Git tag `v1.3.0`: publishes `1.3.0`, `1.3` and an SHA tag to **both** registries. The `latest` tag follows `main`, not version-tag pushes.
+- Runner: `ubuntu-24.04`, platform: `linux/amd64` (not ARM64).
+
+To create a version release after committing the appropriate source code:
+
+```bash
+git tag v1.3.0
+git push origin v1.3.0
+```
+
+Do not recreate a tag if it already exists. Keep the `VERSION` file and Git tags in sync.
 
 ### Run the published image
 
-Keep your current `.env`, `config/`, `data/` and `mounts/` directories. Add a line to `.env`:
+Keep your existing `.env`, `config/`, `data/` and `mounts/` directories, especially `config/fernet.key`. Add **one** `PACKMOUNT_IMAGE` line to `.env`:
 
 ```dotenv
-PACKMOUNT_IMAGE=ghcr.io/owner/packmount:latest
+PACKMOUNT_IMAGE=dosenthegit/packmount:latest
+# Alternative: ghcr.io/dosenthegit/packmount:latest
 ```
 
-Then execute (from the directory containing both Compose files):
+The supplied `docker-compose.ghcr.yml` accepts **either Docker Hub or GHCR** despite its historical filename. Run the same setup for mount propagation described under Installation, then:
 
 ```bash
-mkdir -p config data mounts
 docker compose -f docker-compose.ghcr.yml config
 docker compose -f docker-compose.ghcr.yml pull
 docker compose -f docker-compose.ghcr.yml up -d --no-build
+docker compose -f docker-compose.ghcr.yml ps
 ```
 
-This is a standalone deployment Compose file with no `build:` instruction; it retains the same mounts, ports, and device configuration as the local-build Compose file. For reproducible production deployments, pin `PACKMOUNT_IMAGE` to a released version or digest instead of `latest`.
-
-**Versioning:** Create and push a Git tag `v1.3.0` on the intended commit to publish `1.3.0` and `1.3`. The `latest` tag follows the `main` branch and is published only by main branch builds. Workflow release tags do not automatically update `VERSION`; keep the two synchronized when releasing.
+To upgrade an existing deployment, see [Operations guide](docs/OPERATIONS.md). `docker compose up -d --build` is only for the source-build Compose file; it is not needed for a prebuilt image.

@@ -467,7 +467,7 @@ def apply_samba_config() -> None:
         parts.append("   browsable = yes\n")
         parts.append(f"   read only = {read_only}\n")
         parts.append(f"   guest ok = {guest_ok}\n")
-        parts.append("   force user = " + os.getenv("PACKMOUNT_SAMBA_USER", "packmount") + "\n")
+        parts.append("   force user = " + os.getenv("PACKMOUNT_SMB_USER", os.getenv("PACKMOUNT_SAMBA_USER", "packmount")) + "\n")
         parts.append("   create mask = 0664\n")
         parts.append("   directory mask = 0775\n")
         if not item["allow_network"]:

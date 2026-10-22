@@ -1,3 +1,11 @@
+## Docker Hub + GHCR publication and installation fixes (2026-10-22)
+
+- Publish both `dosenthegit/packmount` and `ghcr.io/dosenthegit/packmount` from one GitHub Actions build.
+- Require `DOCKERHUB_USERNAME` and `DOCKERHUB_TOKEN` GitHub repository secrets.
+- Fix Samba environment variable mismatch: `PACKMOUNT_SMB_USER` / `PACKMOUNT_SMB_PASSWORD` now work as documented; old `PACKMOUNT_SAMBA_*` variables still work as fallbacks.
+- Replace placeholder clone URL with the PackMount repository URL and document reliable bind-mount propagation and binary-image deployment.
+- Note that runtime SMB, NFS and FUSE integration still requires validation on a real Linux Docker host.
+
 # Changelog
 
 ## 1.3.0 - 2026-10-22
