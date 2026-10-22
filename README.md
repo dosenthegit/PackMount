@@ -105,45 +105,6 @@ See [Operations guide](docs/OPERATIONS.md) and [Changes](CHANGELOG.md).
 
 The container needs elevated privileges and cannot sandbox malicious paths as strongly as an unprivileged service. Local source and export configuration should only be given to trusted admins. `rar2fs` doesn't manage encrypted archive passwords in the UI. Passwords for remote SMB mounts are encrypted in SQLite, but the Fernet key is **stored in `/config` on the same host**; secure and back up that directory. This release is statically validated but **not integration-tested with actual FUSE/NFS/SMB mounts in Docker**.
 
-## GitHub Actions: publish to Docker Hub and GHCR
-
-Workflow path: `.github/workflows/docker-publish.yml`. It builds `linux/amd64` once and pushes the generated tags to **both** registries:
-
-- Docker Hub: `dosenthegit/packmount:latest`
-- GitHub Container Registry: `ghcr.io/dosenthegit/packmount:latest`
-
-### Required one-time setup
-
-1. On [Docker Hub](https://hub.docker.com/), sign into the `dosenthegit` account and create a repository named `packmount`, or ensure that account can publish to `dosenthegit/packmount`. Create a Docker Hub **access token with write permissions**; do not use your password.
-2. On GitHub, open `https://github.com/dosenthegit/PackMount/settings/secrets/actions` and create two **Repository secrets**: `DOCKERHUB_USERNAME` = `dosenthegit` and `DOCKERHUB_TOKEN` = your Docker Hub access token.
-3. Under GitHub **Settings → Actions → General → Workflow permissions**, ensure the workflow can publish packages; `.github/workflows/docker-publish.yml` explicitly requests `contents: read` and `packages: write`. The GHCR login uses the automatic `GITHUB_TOKEN`; no extra GHCR personal token is required.
-4. Commit/push all files, including the hidden `.github` folder, to `main`. **Push to main triggers publication automatically**, or use **Actions → Build and publish Docker images → Run workflow → main**.
-5. In Docker Hub and GHCR, configure public visibility if you need anonymous pulls. Check that the workflow has succeeded and both published images appear before deploying.
-
-### Image tags
-
-- Push to `main`: `latest` plus an immutable-looking `sha-...` tag (a tag can still be overwritten by privileged users).
-- Push the Git tag `v1.3.0`: publishes `1.3.0`, `1.3` and an SHA tag to **both** registries. The `latest` tag follows `main`, not version-tag pushes.
-- Runner: `ubuntu-24.04`, platform: `linux/amd64` (not ARM64).
-
-To create a version release after committing the appropriate source code:
-
-```bash
-git tag v1.3.0
-git push origin v1.3.0
-```
-
-Do not recreate a tag if it already exists. Keep the `VERSION` file and Git tags in sync.
-
-### Run the published image
-
-Keep your existing `.env`, `config/`, `data/` and `mounts/` directories, especially `config/fernet.key`. Add **one** `PACKMOUNT_IMAGE` line to `.env`:
-
-```dotenv
-PACKMOUNT_IMAGE=dosenthegit/packmount:latest
-# Alternative: ghcr.io/dosenthegit/packmount:latest
-```
-
 The supplied `docker-compose.ghcr.yml` accepts **either Docker Hub or GHCR** despite its historical filename. Run the same setup for mount propagation described under Installation, then:
 
 ```bash
