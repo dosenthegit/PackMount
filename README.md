@@ -1,227 +1,83 @@
-# PackMount
-<img width="1672" height="941" alt="mockup" src="https://github.com/user-attachments/assets/b6115497-4980-422b-b5f8-6e00a9d93e8d" />
+# PackMount 1.3.0
 
-PackMount is a Dockerized dark-glass web GUI for mounting archive folders through `rar2fs`, adding local/SMB/NFS sources, and re-sharing the mounted unpacked view over SMB or NFS.
+PackMount is a Linux/Docker web UI for presenting RAR archive contents with `rar2fs`, mounting local/SMB/NFS source folders, and exporting mounted views through Samba or NFS. Archives are accessed on demand, **not permanently extracted**.
 
-The application includes:
+![PackMount UI](docs/mockup.png)
 
-- Login-protected web UI on `http://localhost:8080`
-- Local folder source picker for container-visible host folders
-- SMB source mounting through `mount.cifs`
-- NFS source mounting through `mount.nfs`
-- `rar2fs` FUSE mounts with `allow_other`
-- Start, stop, delete, and automount handling
-- SMB share management through Samba
-- NFS export management through `exportfs`
-- SQLite state database in `/config`
-- Encrypted stored remote passwords using a Fernet key in `/config/fernet.key`
+## Prerequisites and security
 
-## Important host requirements
+- **Linux Docker Engine** with Docker Compose v2; `/dev/fuse` must exist. Host kernel must support FUSE, CIFS, NFS client and NFS server as applicable.
+- **Privileged container.** Mounting and kernel NFS require powerful host privileges. Run only on a dedicated/trusted Docker host. Avoid exposing the web UI to the internet.
+- **Ports:** TCP 8080 for UI; TCP 139/445 for SMB; TCP/UDP 111, 2049, 20048 for NFSv3-style services. Expose only the services you need, and firewall access to trusted subnets. Note that NFS kernel services and port publishing may depend on host configuration.
+- Compose uses Docker bridge networking. FUSE propagation and kernel NFS export accessibility can differ by host; **NFS exports are not guaranteed to work behind Docker bridge/NAT**. For NFS production deployment, verify the host kernel, network topology and firewall before use.
 
-This project must run on a Linux Docker host for the real mount/share functionality. The GUI may start on Docker Desktop, but FUSE mounts, kernel NFS, CIFS/NFS client mounts, and mount propagation are Linux kernel features and usually will not work correctly on macOS/Windows Docker Desktop.
-
-Required Linux host features:
-
-- Docker Engine with Compose plugin
-- `/dev/fuse` available on the host
-- Container started with `privileged: true`, `/dev/fuse`, `SYS_ADMIN`, and AppArmor unconfined
-- No existing host services bound to ports 139/445 for SMB or NFS ports if using host networking
-
-## Quick start
+## Installation
 
 ```bash
+git clone <YOUR-REPOSITORY-URL> packmount
 cd packmount
 cp .env.example .env
+# Use distinct, strong values for PACKMOUNT_PASSWORD and PACKMOUNT_SMB_PASSWORD
 nano .env
 mkdir -p config data mounts
-```
-
-Put a test folder with RAR files under `./data`, for example:
-
-```bash
-mkdir -p data/archive
-# copy your .rar files into data/archive
-```
-
-Build and start:
-
-```bash
+# Mount propagation is important for visibility of FUSE mounts on the host.
+sudo mount --make-rshared "$(pwd)/mounts"
+sudo mount --make-rshared "$(pwd)/data"
+docker compose config
 docker compose up -d --build
+docker compose ps
+curl -fsS http://127.0.0.1:8080/api/health
 ```
 
-Open:
+The `mount --make-rshared` command may fail if the directory is not a separate mount point. On many Linux distributions first make the directories bind mount points (`sudo mount --bind mounts mounts` and `sudo mount --bind data data`) then mark them rshared. These host mount settings need to persist after reboot; see [Operations guide](docs/OPERATIONS.md). If propagation is not set up, mounting may work **inside** the container while the host cannot see the mounted view.
 
-```text
-http://localhost:8080
-```
+Open `http://HOST_IP:8080` and sign in using `.env` values. Keep the host firewall restricted to trusted networks, ideally use a TLS reverse proxy and `PACKMOUNT_SECURE_COOKIE=true`.
 
-Default login is configured in `.env`:
+## Add an archive source
 
-```text
-PACKMOUNT_USER=admin
-PACKMOUNT_PASSWORD=change-this-password
-```
+In the UI select **Add source**. For local folders use a path under `/data`, e.g. `/data/archive`; for SMB use `//nas/share`; for NFS use `192.168.1.10:/exports/archive`. Set **Mount to** to an immediate subdirectory of `/mnt/packmount`, e.g. `/mnt/packmount/archive`. Choose whether to start automatically on application startup and whether the source should be read only. Click **Mount**. Local host data under `./data` appears as `/data` inside the container.
 
-## Typical local mount flow
+To re-share, select a registered mount in the UI, then create a share. When guest access is disabled, Samba authenticates with `PACKMOUNT_SMB_USER` and `PACKMOUNT_SMB_PASSWORD`. NFS `Allowed clients` accepts client IPs, CIDRs and DNS names; use a restrictive subnet, e.g. `192.168.1.0/24`, rather than `*`. NFS exports use `root_squash` by default.
 
-1. Open `http://localhost:8080`.
-2. Log in.
-3. In **Add source**, choose **Local folder**.
-4. Use `/data/archive` or click **Browse**.
-5. In **Mount settings**, use `/mnt/packmount/archive`.
-6. Click **Mount**.
-7. The mounted unpacked view is available inside the container at `/mnt/packmount/archive` and, with mount propagation, on the host under `./mounts/archive`.
+SMB client example: `\\HOST_IP\archive` on Windows, or `smb://HOST_IP/archive` on Linux/macOS (substitute the configured share name).
 
-## Typical SMB source flow
+NFS clients use the path exposed by the host's NFS server; test using `showmount -e HOST_IP` before attempting `sudo mount -t nfs HOST_IP:/mnt/packmount/archive /mnt/test`. NFS is host-dependent and may require a different network deployment.
 
-Use these values in the UI:
+## Configuration
 
-```text
-Source type: SMB
-Path / Server: //nas/archive
-Username: your-smb-user
-Password: your-smb-password
-Mount to: /mnt/packmount/nas-archive
-Mount name: NAS Archive
-```
+| Environment variable | Description |
+| --- | --- |
+| `PACKMOUNT_USER` | Web username (default `admin`) |
+| `PACKMOUNT_PASSWORD` | **Required unique** web password |
+| `PACKMOUNT_SMB_USER` | Samba user (default `packmount`) |
+| `PACKMOUNT_SMB_PASSWORD` | **Required unique** Samba password |
+| `PACKMOUNT_SMB_WORKGROUP` | Samba workgroup (default `WORKGROUP`) |
+| `PACKMOUNT_SECURE_COOKIE` | Set `true` behind HTTPS proxy |
+| `PACKMOUNT_SESSION_MAX_AGE` | Web cookie max age in seconds |
+| `PACKMOUNT_ENABLE_SAMBA` | Start Samba daemons (`true` by default) |
+| `PACKMOUNT_ENABLE_NFSD` | Start NFS daemons (`true` by default) |
+| `PACKMOUNT_NFSD_THREADS` | Kernel NFS worker count (default 8) |
+| `PACKMOUNT_MOUNTD_PORT` | mountd port (default 20048) |
+| `PACKMOUNT_ALLOWED_LOCAL_ROOTS` | Allowed local folder roots (default `/data,/mnt,/media`) |
 
-The backend first mounts `//nas/archive` into an internal runtime folder and then mounts the rar2fs view to the chosen mountpoint.
+You can disable unneeded services in `.env`, **and remove their published ports** in Compose. Database and secrets live in `/config`.
 
-## Typical NFS source flow
+## Upgrade from 1.2.3 or earlier
 
-Use these values in the UI:
-
-```text
-Source type: NFS
-Path / Server: 192.168.1.50:/export/archive
-Mount to: /mnt/packmount/nfs-archive
-Mount name: NFS Archive
-```
-
-The backend first mounts the NFS export into an internal runtime folder and then mounts the rar2fs view to the chosen mountpoint.
-
-## Sharing the mounted folder
-
-After a mount is active, click the row in **Active mounts**. The share form will fill in the mounted path.
-
-### SMB sharing
-
-1. Select **SMB share**.
-2. Set a share name, for example `Archive-share`.
-3. Keep path as `/mnt/packmount/archive`.
-4. Select `Read/write` or `Read-only`.
-5. Enable guest access only if you want anonymous LAN access.
-6. Click **Enable sharing**.
-
-From another machine:
-
-```text
-smb://YOUR_DOCKER_HOST/Archive-share
-```
-
-If guest is disabled, use:
-
-```text
-Username: value of PACKMOUNT_SMB_USER
-Password: value of PACKMOUNT_SMB_PASSWORD
-```
-
-### NFS sharing
-
-1. Select **NFS share**.
-2. Set a share name.
-3. Keep path as the rar2fs mount path.
-4. Use `Allowed clients` such as `192.168.1.0/24` or `*`.
-5. Click **Enable sharing**.
-
-From another Linux machine, a typical mount command is:
-
-```bash
-sudo mount -t nfs YOUR_DOCKER_HOST:/mnt/packmount/archive /mnt/test
-```
-
-## Environment variables
-
-| Variable | Default | Purpose |
-| --- | --- | --- |
-| `PACKMOUNT_USER` | `admin` | Web login username |
-| `PACKMOUNT_PASSWORD` | `admin` | Web login password. Change this. |
-| `PACKMOUNT_SMB_USER` | `packmount` | Samba user created on container start |
-| `PACKMOUNT_SMB_PASSWORD` | `packmount` | Samba password. Change this. |
-| `PACKMOUNT_SMB_WORKGROUP` | `WORKGROUP` | Samba workgroup |
-| `PACKMOUNT_ENABLE_SAMBA` | `true` | Start Samba daemon |
-| `PACKMOUNT_ENABLE_NFSD` | `true` | Start kernel NFS services |
-| `PACKMOUNT_DATA_PATH` | `./data` | Host folder mounted as `/data` in the container |
-| `PACKMOUNT_ALLOWED_LOCAL_ROOTS` | `/data,/mnt,/media` | Roots visible to the local folder picker |
-
-## Project layout
-
-```text
-packmount/
-  Dockerfile
-  docker-compose.yml
-  docker-compose.bridge.yml
-  .env.example
-  backend/
-    app.py
-    requirements.txt
-    static/
-      index.html
-      styles.css
-      app.js
-  scripts/
-    entrypoint.sh
-    healthcheck.sh
-  docs/
-    mockup.png
-  config/
-  data/
-  mounts/
-```
+**Back up the entire `config` directory**, including SQLite WAL/SHM files and `fernet.key`, after stopping the container. Preserve the same Compose bind mounts. Then deploy this version and rebuild. See [Operations guide](docs/OPERATIONS.md) for commands and rollback. The database schema stays compatible. Existing shares using root privileges may behave differently because newly generated Samba configurations no longer use `force user = root`, and NFS now defaults to `root_squash`. Review filesystem ownership and client access after upgrading.
 
 ## Troubleshooting
 
-Check the app logs:
-
 ```bash
-docker logs -f packmount
+docker compose ps
+docker compose logs --tail=200 packmount
+docker compose exec packmount testparm -s
+docker compose exec packmount exportfs -v
+docker compose exec packmount mount
 ```
 
-Open a shell:
+See [Operations guide](docs/OPERATIONS.md) and [Changes](CHANGELOG.md).
 
-```bash
-docker exec -it packmount bash
-```
+## Important limitations
 
-Check mounted filesystems:
-
-```bash
-mount | grep packmount
-mountpoint /mnt/packmount/archive
-```
-
-Check Samba configuration:
-
-```bash
-docker exec -it packmount testparm -s
-```
-
-Check NFS exports:
-
-```bash
-docker exec -it packmount exportfs -v
-```
-
-If rar2fs fails with a FUSE error, verify that the container is started with `/dev/fuse`, `SYS_ADMIN`, `privileged: true`, and `apparmor:unconfined`.
-
-## Security notes
-
-- Change all passwords in `.env` before exposing the service to a network.
-- Remote SMB passwords are encrypted in SQLite, but the encryption key is stored in `/config/fernet.key`. Protect the `config` folder.
-- `Allow guest` means anonymous SMB access for that share.
-- `Allowed clients` can restrict SMB/NFS access. Leave blank or use `*` only on trusted networks.
-- This container performs privileged mount operations. Run it only on a host you control.
-
-## Notes about rar2fs behavior
-
-`rar2fs` exposes archive contents on demand. It does not permanently unpack archives. Encrypted RAR files require rar2fs-compatible password sidecar files, such as `.pwd` or `.rarconfig`; this GUI does not manage archive passwords.
+The container needs elevated privileges and cannot sandbox malicious paths as strongly as an unprivileged service. Local source and export configuration should only be given to trusted admins. `rar2fs` doesn't manage encrypted archive passwords in the UI. Passwords for remote SMB mounts are encrypted in SQLite, but the Fernet key is **stored in `/config` on the same host**; secure and back up that directory. This release is statically validated but **not integration-tested with actual FUSE/NFS/SMB mounts in Docker**.

@@ -48,8 +48,8 @@ WORKDIR /app
 COPY backend/requirements.txt /app/requirements.txt
 RUN pip install --no-cache-dir -r /app/requirements.txt
 COPY backend /app
-COPY scripts/entrypoint.sh /usr/local/bin/entrypoint.sh
-RUN chmod +x /usr/local/bin/entrypoint.sh \
+COPY scripts/entrypoint.sh scripts/healthcheck.sh /usr/local/bin/
+RUN chmod +x /usr/local/bin/entrypoint.sh /usr/local/bin/healthcheck.sh \
     && mkdir -p /config /data /mnt/packmount /run/packmount/sources /run/packmount/credentials /var/log/samba /etc/exports.d
 
 EXPOSE 8080 139 445 111/tcp 111/udp 2049/tcp 2049/udp 20048/tcp 20048/udp

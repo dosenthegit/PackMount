@@ -10,6 +10,7 @@ import uuid
 from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
+from urllib.parse import urlsplit
 from typing import Any, Dict, List, Optional
 
 from cryptography.fernet import Fernet, InvalidToken
@@ -19,7 +20,7 @@ from fastapi.staticfiles import StaticFiles
 from itsdangerous import BadSignature, SignatureExpired, URLSafeTimedSerializer
 from pydantic import BaseModel, Field, field_validator
 
-APP_VERSION = "1.2.3"
+APP_VERSION = "1.3.0"
 APP_NAME = "PackMount"
 
 CONFIG_DIR = Path(os.getenv("PACKMOUNT_CONFIG_DIR", "/config"))
@@ -73,12 +74,14 @@ def ensure_runtime_dirs() -> None:
 def load_or_create_text_secret(path: Path, length: int = 64) -> str:
     path.parent.mkdir(parents=True, exist_ok=True)
     if path.exists():
+        path.chmod(0o600)
         value = path.read_text(encoding="utf-8").strip()
         if value:
             return value
     value = secrets.token_urlsafe(length)
-    path.write_text(value, encoding="utf-8")
-    path.chmod(0o600)
+    with path.open("x", encoding="utf-8") as secret_file:
+        os.fchmod(secret_file.fileno(), 0o600)
+        secret_file.write(value)
     return value
 
 
@@ -90,14 +93,16 @@ def get_serializer() -> URLSafeTimedSerializer:
 def get_fernet() -> Fernet:
     FERNET_KEY_PATH.parent.mkdir(parents=True, exist_ok=True)
     if FERNET_KEY_PATH.exists():
+        FERNET_KEY_PATH.chmod(0o600)
         key = FERNET_KEY_PATH.read_bytes().strip()
         try:
             return Fernet(key)
-        except Exception:
-            pass
+        except Exception as exc:
+            raise RuntimeError("Invalid Fernet key; restore /config/fernet.key from backup") from exc
     key = Fernet.generate_key()
-    FERNET_KEY_PATH.write_bytes(key)
-    FERNET_KEY_PATH.chmod(0o600)
+    with FERNET_KEY_PATH.open("xb") as secret_file:
+        os.fchmod(secret_file.fileno(), 0o600)
+        secret_file.write(key)
     return Fernet(key)
 
 
@@ -112,8 +117,8 @@ def decrypt_secret(value: Optional[str]) -> str:
         return ""
     try:
         return get_fernet().decrypt(value.encode("utf-8")).decode("utf-8")
-    except InvalidToken:
-        return ""
+    except InvalidToken as exc:
+        raise RuntimeError("Cannot decrypt stored source password; check /config/fernet.key") from exc
 
 
 @contextmanager
@@ -121,6 +126,7 @@ def db() -> sqlite3.Connection:
     ensure_runtime_dirs()
     conn = sqlite3.connect(DB_PATH, timeout=30)
     conn.row_factory = sqlite3.Row
+    conn.execute("PRAGMA busy_timeout=30000")
     try:
         yield conn
         conn.commit()
@@ -180,6 +186,7 @@ def init_db() -> None:
             )
             """
         )
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_logs_created ON logs(id DESC)")
 
 
 def add_log(level: str, message: str, details: Optional[Any] = None) -> None:
@@ -211,12 +218,12 @@ def run_cmd(args: List[str], timeout: int = COMMAND_TIMEOUT, check: bool = True)
     except FileNotFoundError as exc:
         raise RuntimeError(f"Command not found: {args[0]}") from exc
     except subprocess.TimeoutExpired as exc:
-        raise RuntimeError(f"Command timed out after {timeout}s: {' '.join(args)}") from exc
+        raise RuntimeError(f"Command timed out after {timeout}s: {args[0]}") from exc
     if check and result.returncode != 0:
         stderr = (result.stderr or "").strip()
         stdout = (result.stdout or "").strip()
         detail = stderr or stdout or f"exit code {result.returncode}"
-        raise RuntimeError(f"Command failed: {' '.join(args)}: {detail}")
+        raise RuntimeError(f"Command failed: {args[0]}: {detail}")
     return result
 
 
@@ -265,21 +272,21 @@ def assert_allowed_local_path(path: Path) -> None:
 
 def normalize_smb_path(value: str) -> str:
     value = value.strip().replace("\\", "/")
-    if not value.startswith("//"):
+    if not re.fullmatch(r"//[^/\s,=]+/[^/\s,=]+(?:/[^\s]*)?", value) or any(c in value for c in "\r\n\x00"):
         raise HTTPException(status_code=400, detail="SMB source must look like //server/share or //server/share/path")
     return value
 
 
 def normalize_nfs_path(value: str) -> str:
     value = value.strip()
-    if not NFS_SOURCE_RE.match(value):
+    if not NFS_SOURCE_RE.fullmatch(value) or any(c in value for c in "\r\n\x00, "):
         raise HTTPException(status_code=400, detail="NFS source must look like server:/export/path")
     return value
 
 
 def sanitize_share_name(name: str) -> str:
     name = name.strip()
-    if not SAFE_SHARE_RE.match(name):
+    if not SAFE_SHARE_RE.fullmatch(name) or name in {".", ".."}:
         raise HTTPException(status_code=400, detail="Share name may contain letters, numbers, dot, dash and underscore only")
     return name
 
@@ -351,8 +358,11 @@ def mount_remote_source(record: Dict[str, Any]) -> Path:
         password = decrypt_secret(record.get("source_password_enc"))
         cred_file = credentials_file_path(mount_id)
         cred_file.parent.mkdir(parents=True, exist_ok=True)
-        cred_file.write_text(f"username={username}\npassword={password}\n", encoding="utf-8")
-        cred_file.chmod(0o600)
+        if any(c in username + password for c in "\r\n\x00"):
+            raise RuntimeError("SMB credentials must not contain newlines")
+        with cred_file.open("w", encoding="utf-8") as f:
+            os.fchmod(f.fileno(), 0o600)
+            f.write(f"username={username}\npassword={password}\n")
         opts = [
             f"credentials={cred_file}",
             "iocharset=utf8",
@@ -361,11 +371,14 @@ def mount_remote_source(record: Dict[str, Any]) -> Path:
             "dir_mode=0775",
             "noperm",
         ]
-        run_cmd(["mount", "-t", "cifs", source_path, str(remote_path), "-o", ",".join(opts)], timeout=60)
+        try:
+            run_cmd(["mount", "-t", "cifs", source_path, str(remote_path), "-o", ",".join(opts)], timeout=60)
+        finally:
+            cred_file.unlink(missing_ok=True)
         return remote_path
 
     if source_type == "nfs":
-        opts = "rw,soft,timeo=50,retrans=3,nolock"
+        opts = "ro,hard,timeo=600,retrans=2" if int(record.get("read_only") or 0) else "rw,hard,timeo=600,retrans=2"
         run_cmd(["mount", "-t", "nfs", source_path, str(remote_path), "-o", opts], timeout=60)
         return remote_path
 
@@ -426,12 +439,13 @@ def unmount_record(record: Dict[str, Any]) -> None:
     if record["source_type"] in {"smb", "nfs"}:
         remote = Path(record.get("remote_mount_point") or str(remote_mount_path(mount_id)))
         try_unmount_path(remote)
+    credentials_file_path(mount_id).unlink(missing_ok=True)
     update_mount_status(mount_id, "Stopped", None)
     add_log("INFO", f"Stopped mount {record['source_path']}", {"mount_to": str(mount_to)})
 
 
 def samba_global_config() -> str:
-    return f"""# Generated by PackMount. Manual changes may be overwritten.\n[global]\n   workgroup = {SMB_WORKGROUP}\n   server string = PackMount\n   security = user\n   map to guest = Bad User\n   guest account = nobody\n   server min protocol = SMB2\n   load printers = no\n   printing = bsd\n   disable spoolss = yes\n   log file = /var/log/samba/log.%m\n   max log size = 1000\n   smb ports = 445 139\n   unix extensions = no\n\n"""
+    return f"""# Generated by PackMount. Manual changes may be overwritten.\n[global]\n   workgroup = {SMB_WORKGROUP}\n   server string = PackMount\n   security = user\n   map to guest = Bad User\n   guest account = nobody\n   server min protocol = SMB3\n   load printers = no\n   printing = bsd\n   disable spoolss = yes\n   log file = /var/log/samba/log.%m\n   max log size = 1000\n   smb ports = 445 139\n   unix extensions = no\n\n"""
 
 
 def apply_samba_config() -> None:
@@ -439,6 +453,8 @@ def apply_samba_config() -> None:
         rows = conn.execute(
             "SELECT * FROM shares WHERE enabled=1 AND share_type='smb' ORDER BY created_at ASC"
         ).fetchall()
+    if not re.fullmatch(r"[A-Za-z0-9_.-]+", SMB_WORKGROUP):
+        raise ValueError("Invalid Samba workgroup")
     parts = [samba_global_config()]
     for row in rows:
         item = serialize_share(row)
@@ -451,7 +467,7 @@ def apply_samba_config() -> None:
         parts.append("   browsable = yes\n")
         parts.append(f"   read only = {read_only}\n")
         parts.append(f"   guest ok = {guest_ok}\n")
-        parts.append("   force user = root\n")
+        parts.append("   force user = " + os.getenv("PACKMOUNT_SAMBA_USER", "packmount") + "\n")
         parts.append("   create mask = 0664\n")
         parts.append("   directory mask = 0775\n")
         if not item["allow_network"]:
@@ -476,6 +492,8 @@ def nfs_client_specs(share: Dict[str, Any]) -> List[str]:
     if not share["allow_network"]:
         return ["127.0.0.1"]
     allowed = (share.get("allowed_clients") or "*").strip()
+    if not re.fullmatch(r"[A-Za-z0-9.*:/,_ -]+", allowed):
+        raise ValueError("Invalid allowed clients (only hostnames, IP addresses and CIDR ranges)")
     clients = [c.strip() for c in re.split(r"[, ]+", allowed) if c.strip()]
     return clients or ["*"]
 
@@ -495,7 +513,7 @@ def apply_nfs_exports() -> None:
         item = serialize_share(row)
         path = Path(item["path"])
         mode = "rw" if item["permission"] == "rw" else "ro"
-        opts = f"{mode},sync,no_subtree_check,no_root_squash,fsid={nfs_fsid_for_share(item['id'], index)}"
+        opts = f"{mode},sync,no_subtree_check,root_squash,fsid={nfs_fsid_for_share(item['id'], index)}"
         for client in nfs_client_specs(item):
             lines.append(f"{path} {client}({opts})\n")
     NFS_EXPORTS_PATH.parent.mkdir(parents=True, exist_ok=True)
@@ -580,16 +598,30 @@ def require_user(request: Request) -> str:
     username = data.get("sub")
     if username != WEB_USERNAME:
         raise HTTPException(status_code=401, detail="Invalid session")
+    if request.method not in {"GET", "HEAD", "OPTIONS"}:
+        origin = request.headers.get("origin")
+        if origin:
+            host = request.headers.get("host", "")
+            parsed = urlsplit(origin)
+            if parsed.scheme not in {"http", "https"} or parsed.netloc != host:
+                raise HTTPException(status_code=403, detail="Cross-origin request blocked")
     return username
 
 
 @app.on_event("startup")
 def on_startup() -> None:
     ensure_runtime_dirs()
+    if WEB_PASSWORD in {"change-me-now", "admin", "packmount", "", "REPLACE_WITH_STRONG_UNIQUE_PASSWORD"}:
+        raise RuntimeError("Set a unique PACKMOUNT_PASSWORD in .env before starting")
     init_db()
     apply_all_shares()
     restore_automounts()
     add_log("INFO", "PackMount started", {"version": APP_VERSION})
+
+
+@app.get("/api/health")
+def health() -> Dict[str, str]:
+    return {"status": "ok", "version": APP_VERSION}
 
 
 @app.get("/")
@@ -664,6 +696,8 @@ def create_mount(payload: MountCreate, user: str = Depends(require_user)) -> Dic
     if not mount_to.is_absolute():
         raise HTTPException(status_code=400, detail="Mount path must be absolute")
     assert_under_mount_root(mount_to)
+    if mount_to.resolve() == MOUNT_ROOT or mount_to.resolve().parent != MOUNT_ROOT:
+        raise HTTPException(status_code=400, detail="Mount destination must be a direct child of the mount root")
     source_path = payload.source_path
     remote_point = None
 
@@ -792,9 +826,15 @@ def create_share(payload: ShareCreate, user: str = Depends(require_user)) -> Dic
     if not share_path.is_absolute():
         raise HTTPException(status_code=400, detail="Share path must be absolute")
     assert_under_mount_root(share_path)
+    with db() as conn:
+        known_mounts = {row[0] for row in conn.execute("SELECT mount_to FROM mounts").fetchall()}
+    if str(share_path) not in known_mounts:
+        raise HTTPException(status_code=400, detail="Share path must refer to a registered mount")
     if not share_path.exists() or not share_path.is_dir():
         raise HTTPException(status_code=400, detail=f"Share path does not exist or is not a directory: {share_path}")
 
+    if payload.allowed_clients and not re.fullmatch(r"[A-Za-z0-9.*:/,_ -]+", payload.allowed_clients):
+        raise HTTPException(status_code=400, detail="Invalid allowed clients")
     record = {
         "id": share_id,
         "share_type": payload.share_type,
