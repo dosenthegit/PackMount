@@ -61,7 +61,6 @@ jobs:
         with:
           images: |
             d0sn/packmount
-            ghcr.io/dosenthegit/packmount
             ${{ steps.image.outputs.name }}
           flavor: |
             latest=false
@@ -84,6 +83,18 @@ jobs:
           cache-to: type=gha,mode=max
           provenance: mode=max
           sbom: true
+
+      # Docker Hub does not automatically import README.md for GitHub Actions builds.
+      - name: Sync README to Docker Hub
+        if: github.ref == 'refs/heads/main'
+        uses: peter-evans/dockerhub-description@v5
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+          repository: d0sn/packmount
+          readme-filepath: ./README.md
+          short-description: PackMount - web UI for rar2fs, SMB and NFS mounts and shares
+          enable-url-completion: true
 
       - name: Write image summary
         env:
