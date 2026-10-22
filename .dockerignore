@@ -1,0 +1,9 @@
+.git
+.env
+config
+data
+mounts
+docs
+*.zip
+__pycache__
+*.pyc
