@@ -81,3 +81,34 @@ See [Operations guide](docs/OPERATIONS.md) and [Changes](CHANGELOG.md).
 ## Important limitations
 
 The container needs elevated privileges and cannot sandbox malicious paths as strongly as an unprivileged service. Local source and export configuration should only be given to trusted admins. `rar2fs` doesn't manage encrypted archive passwords in the UI. Passwords for remote SMB mounts are encrypted in SQLite, but the Fernet key is **stored in `/config` on the same host**; secure and back up that directory. This release is statically validated but **not integration-tested with actual FUSE/NFS/SMB mounts in Docker**.
+
+## GitHub Actions: build and publish to GHCR
+
+This repository includes `.github/workflows/docker-publish.yml`.
+
+1. Commit/push all project files **including the hidden `.github` directory** to the `main` branch.
+2. In GitHub, go to **Settings → Actions → General → Workflow permissions**. The workflow requests `contents: read` and `packages: write`; organization policy must allow package publication. It uses the automatic `GITHUB_TOKEN` (no personal access token required).
+3. Go to **Actions → Build and publish Docker images → Run workflow → main → Run workflow**. A push to `main` also runs it automatically. A push of a version tag such as `v1.3.0` produces versioned image tags.
+4. After success, find the image in **Packages**; the default is `ghcr.io/OWNER/REPO:latest` (both owner and repository lowercased). It builds **linux/amd64** only; ARM hosts are not supported by this pipeline.
+5. The package may initially be private. Set its visibility in GitHub package settings to public if you need unauthenticated pulling; otherwise run `docker login ghcr.io` with a token that can read packages on the deployment host.
+
+### Run the published image
+
+Keep your current `.env`, `config/`, `data/` and `mounts/` directories. Add a line to `.env`:
+
+```dotenv
+PACKMOUNT_IMAGE=ghcr.io/owner/packmount:latest
+```
+
+Then execute (from the directory containing both Compose files):
+
+```bash
+mkdir -p config data mounts
+docker compose -f docker-compose.ghcr.yml config
+docker compose -f docker-compose.ghcr.yml pull
+docker compose -f docker-compose.ghcr.yml up -d --no-build
+```
+
+This is a standalone deployment Compose file with no `build:` instruction; it retains the same mounts, ports, and device configuration as the local-build Compose file. For reproducible production deployments, pin `PACKMOUNT_IMAGE` to a released version or digest instead of `latest`.
+
+**Versioning:** Create and push a Git tag `v1.3.0` on the intended commit to publish `1.3.0` and `1.3`. The `latest` tag follows the `main` branch and is published only by main branch builds. Workflow release tags do not automatically update `VERSION`; keep the two synchronized when releasing.

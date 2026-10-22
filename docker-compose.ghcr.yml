@@ -1,0 +1,47 @@
+# Standalone compose file for published GHCR image. Keep original docker-compose.yml for local builds.
+services:
+  packmount:
+    image: ${PACKMOUNT_IMAGE:?Set PACKMOUNT_IMAGE in .env, e.g. ghcr.io/owner/packmount:latest}
+    container_name: packmount
+    restart: unless-stopped
+    init: true
+    privileged: true # FUSE/CIFS/NFS mounts require host-level privileges; trusted host only.
+    devices:
+      - /dev/fuse:/dev/fuse
+    security_opt:
+      - apparmor:unconfined
+    env_file:
+      - .env
+    ports:
+      - "8080:8080/tcp"
+      - "445:445/tcp"
+      - "139:139/tcp"
+      - "111:111/tcp"
+      - "111:111/udp"
+      - "2049:2049/tcp"
+      - "2049:2049/udp"
+      - "20048:20048/tcp"
+      - "20048:20048/udp"
+    volumes:
+      - ./config:/config
+      - type: bind
+        source: ./data
+        target: /data
+        bind:
+          propagation: rshared
+      - type: bind
+        source: ./mounts
+        target: /mnt/packmount
+        bind:
+          propagation: rshared
+    healthcheck:
+      test: ["CMD", "/usr/local/bin/healthcheck.sh"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 90s
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
