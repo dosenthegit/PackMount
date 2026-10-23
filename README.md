@@ -44,7 +44,7 @@ Open `http://HOST_IP:8080` and sign in using the credentials set in `.env`. If b
 
 ### Install using a published image instead of building locally
 
-After cloning, preparing `.env`, making the directories and arranging mount propagation as above, set `PACKMOUNT_IMAGE=dosenthegit/packmount:latest` in `.env` (or use `ghcr.io/dosenthegit/packmount:latest`). Then:
+After cloning, preparing `.env`, making the directories and arranging mount propagation as above, set `PACKMOUNT_IMAGE=d0sn/packmount:latest` in `.env` (or use `ghcr.io/dosenthegit/packmount:latest`). Then:
 
 ```bash
 docker compose -f docker-compose.ghcr.yml config
@@ -55,6 +55,22 @@ curl -fsS http://127.0.0.1:8080/api/health
 ```
 
 Docker Hub images are public only if their repository is public; GHCR images also require **public package visibility** or a login with read permission. Prefer a numbered release tag for reproducibility, rather than `latest`.
+
+## Updating PackMount (published Docker images)
+
+For a production installation, use a **specific version tag** (`d0sn/packmount:1.3.0`) when available rather than `latest`. For an installation tracking `latest`, the following pulls the newest image. Updating always restarts the container and may interrupt SMB/NFS clients and active FUSE mounts; schedule maintenance accordingly.
+
+From your existing checkout, with `.env` containing `PACKMOUNT_IMAGE=d0sn/packmount:latest` (or the GHCR equivalent):
+
+```bash
+./scripts/update.sh
+```
+
+The script downloads the image *before* stopping the existing container, stops it, saves a timestamped `config/` backup in `../packmount-backups`, recreates the container, and checks the API health endpoint. It does **not** automatically roll back failures and cannot verify actual FUSE/SMB/NFS operation. Back up or snapshot `data/` independently; it is not included. The script does not update the source checkout or itself, so run `git pull --ff-only` separately if new deployment scripts or Compose changes have been published. Never run `git pull` over uncommitted local changes.
+
+For a **source-built** installation (`docker-compose.yml`), update project files with Git and run `docker compose up -d --build` after a stopped-container `config/` backup. Do not use `scripts/update.sh` for source builds.
+
+Fully automatic unattended upgrades are **not enabled by default**, because forced restarts may disrupt active mounts or clients. A controlled maintenance schedule is safer. See [Operations](docs/OPERATIONS.md) for precautions and recovery steps.
 
 ## Add an archive source
 
@@ -104,14 +120,3 @@ See [Operations guide](docs/OPERATIONS.md) and [Changes](CHANGELOG.md).
 ## Important limitations
 
 The container needs elevated privileges and cannot sandbox malicious paths as strongly as an unprivileged service. Local source and export configuration should only be given to trusted admins. `rar2fs` doesn't manage encrypted archive passwords in the UI. Passwords for remote SMB mounts are encrypted in SQLite, but the Fernet key is **stored in `/config` on the same host**; secure and back up that directory. This release is statically validated but **not integration-tested with actual FUSE/NFS/SMB mounts in Docker**.
-
-The supplied `docker-compose.ghcr.yml` accepts **either Docker Hub or GHCR** despite its historical filename. Run the same setup for mount propagation described under Installation, then:
-
-```bash
-docker compose -f docker-compose.ghcr.yml config
-docker compose -f docker-compose.ghcr.yml pull
-docker compose -f docker-compose.ghcr.yml up -d --no-build
-docker compose -f docker-compose.ghcr.yml ps
-```
-
-To upgrade an existing deployment, see [Operations guide](docs/OPERATIONS.md). `docker compose up -d --build` is only for the source-build Compose file; it is not needed for a prebuilt image.

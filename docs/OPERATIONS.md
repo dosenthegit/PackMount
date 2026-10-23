@@ -70,7 +70,7 @@ Do not extract a backup over a running SQLite database. Restoring an older DB di
 
 ## Deploy and update from Docker Hub or GHCR
 
-Use `docker-compose.ghcr.yml` with `PACKMOUNT_IMAGE=dosenthegit/packmount:latest` (or `ghcr.io/dosenthegit/packmount:latest`) in `.env`. Preserve the entire `/config` host bind directory, particularly `fernet.key`. Backup first as described above; then:
+Use `docker-compose.ghcr.yml` with `PACKMOUNT_IMAGE=d0sn/packmount:latest` (or `ghcr.io/dosenthegit/packmount:latest`) in `.env`. Preserve the entire `/config` host bind directory, particularly `fernet.key`. Backup first as described above; then:
 
 ```bash
 docker compose -f docker-compose.ghcr.yml pull
@@ -79,3 +79,11 @@ docker compose -f docker-compose.ghcr.yml ps
 ```
 
 The `rshared` host mount setup must be in place before startup and persist after reboot. Do not use `docker compose up -d --build` with the published-image file. Check SMB and NFS access after upgrading.
+
+## Easier image-based updates
+
+After the initial published-image installation, run `./scripts/update.sh` from the repository directory in a maintenance window. It pulls the configured `PACKMOUNT_IMAGE`, stops the service, backs up `config/` and starts the new image, then checks the internal API healthcheck. The script does not update itself: use `git pull --ff-only` to fetch updated scripts/docs, after reviewing changes. It does not preserve a copy of the previous image tag for automatic rollback, and a healthy API does not guarantee that rar2fs, SMB or NFS are functioning.
+
+**Manual rollback:** stop the service, restore a known previous immutable image tag (or digest) in `.env`, then start it again. Restore the `config/` backup only if required and only while the container is down. Verify mount propagation and clients after every upgrade.
+
+**Unattended upgrades:** not recommended by default for a privileged filesystem service. If necessary, schedule `scripts/update.sh` during a known maintenance window with systemd, with monitoring and a tested rollback plan, rather than updating at an arbitrary time.

@@ -43,3 +43,8 @@ Python syntax and shell syntax validated. Docker image build and kernel mount in
 - Added `docker-compose.ghcr.yml` and documented how to pull/run without a local build.
 ## Packaging refresh
 - Updated docs/mockup.png to match the simplified sidebar (Overview, Settings, Logs only).
+
+## Documentation and deployment maintenance
+- Corrected Docker Hub image references to `d0sn/packmount`.
+- Added `scripts/update.sh` for manual pull, config backup, restart and API health verification for image-based installations.
+- Consolidated README upgrade guidance and clarified upgrade limitations.
