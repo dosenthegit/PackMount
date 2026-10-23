@@ -1,3 +1,8 @@
+### Interface cleanup (2026-10-23)
+- Removed inactive Sources, Mounts and Shares links from the sidebar.
+- Kept source, mount and sharing panels on the Overview dashboard.
+- Simplified sidebar navigation handling.
+
 ## Docker Hub + GHCR publication and installation fixes (2026-10-22)
 
 - Publish both `dosenthegit/packmount` and `ghcr.io/dosenthegit/packmount` from one GitHub Actions build.

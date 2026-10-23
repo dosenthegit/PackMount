@@ -240,9 +240,9 @@ function bindEvents() {
       await refreshAll(); renderLogsOverlay();
     } else if (section === 'settings') {
       renderSettingsOverlay();
-    } else {
+    } else if (section === 'overview') {
       closeOverlay();
-      document.querySelector(`[class*="${section === 'overview' ? 'status-panel' : section === 'sources' ? 'source-panel' : section === 'mounts' ? 'active-mounts' : 'share-panel'}"]`)?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      window.scrollTo({ top: 0, behavior: 'smooth' });
     }
   }));
 

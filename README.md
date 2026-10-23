@@ -11,56 +11,18 @@ PackMount is a Linux/Docker web UI for presenting RAR archive contents with `rar
 - **Ports:** TCP 8080 for UI; TCP 139/445 for SMB; TCP/UDP 111, 2049, 20048 for NFSv3-style services. Expose only the services you need, and firewall access to trusted subnets. Note that NFS kernel services and port publishing may depend on host configuration.
 - Compose uses Docker bridge networking. FUSE propagation and kernel NFS export accessibility can differ by host; **NFS exports are not guaranteed to work behind Docker bridge/NAT**. For NFS production deployment, verify the host kernel, network topology and firewall before use.
 
-## Install host dependencies with the helper script
-
-The optional `scripts/install-dependencies.sh` helper installs or verifies Docker Engine, Docker Compose v2, FUSE3, CIFS/NFS client utilities, kernel-module tools and basic utilities. It supports Ubuntu/Debian, Fedora/RHEL-family and Alpine Linux. Run it **on the Linux Docker host**, not inside the PackMount container.
-
-```bash
-git clone https://github.com/dosenthegit/PackMount.git packmount
-cd packmount
-chmod +x scripts/install-dependencies.sh
-sudo ./scripts/install-dependencies.sh --check-only  # read-only checks first
-sudo ./scripts/install-dependencies.sh               # install prerequisites
-sudo ./scripts/install-dependencies.sh --check-only  # verify ports and FUSE
-```
-
-`--check-only` **does not install packages or modify services**. The default installation enables Docker but never stops `rpcbind`, creates mount propagation, opens firewall ports, or deploys PackMount. Package installation may itself enable `rpcbind`, so recheck ports afterward. `--help` shows the supported options.
-
-### Port 111 or 2049 already in use?
-
-PackMount's optional NFS service may conflict with a host `rpcbind` listener on TCP/UDP **111**, or with an existing NFS server on **2049**. Diagnose before starting Compose:
-
-```bash
-sudo ./scripts/install-dependencies.sh --check-only
-sudo ss -tulpn | grep -E ':(111|2049)\b' || true
-sudo systemctl status rpcbind.socket rpcbind.service  # systemd hosts
-```
-
-If this host already uses NFS mounts, NFSv3 or other RPC services, **do not disable `rpcbind`**. Instead, consider running PackMount on a dedicated host or disabling PackMount NFS (`PACKMOUNT_ENABLE_NFSD=false`) **and removing the unused NFS port mappings from the Compose file**. Changing the environment variable alone does not release published ports.
-
-Only on a host that does **not** depend on RPC/NFS services, you may explicitly ask the installer to disable host `rpcbind`:
-
-```bash
-sudo ./scripts/install-dependencies.sh --disable-host-rpcbind
-sudo ./scripts/install-dependencies.sh --check-only
-```
-
-That option checks for common host NFS mounts/server configuration and asks you to type `DISABLE` before stopping/disabling the systemd `rpcbind` socket and service. Its checks cannot detect every RPC dependency; assess your host before proceeding. The option is only supported on systemd hosts and is **never** performed during a normal installation. It also installs/verifies dependencies as part of that run.
-
-If `/dev/fuse` is missing, check kernel support and whether an outer hypervisor/LXC environment permits FUSE. The script cannot grant missing host/container permissions. Review [Operations guide](docs/OPERATIONS.md) for mount propagation and operational considerations.
-
 ## Installation (build from GitHub source)
 
-On a **Linux Docker host** (not Docker Desktop), install prerequisites with the helper above or manually. Confirm that `/dev/fuse` exists and host FUSE/CIFS/NFS features required by your use case are available.
+Run on a **Linux Docker host** (not Docker Desktop). Install Git, Docker Engine and Docker Compose v2 first. Check that `/dev/fuse` exists. The host must support the applicable CIFS/NFS/FUSE kernel features.
 
 ```bash
-# Skip these first two lines if you already cloned the repository above.
 git clone https://github.com/dosenthegit/PackMount.git packmount
 cd packmount
 cp .env.example .env
 nano .env
 # Set distinct, strong PACKMOUNT_PASSWORD and PACKMOUNT_SMB_PASSWORD.
 mkdir -p config data mounts
+
 # rshared propagation: make each path a mountpoint before setting propagation.
 # Only run this after reviewing mounts on the host.
 sudo mount --bind "$(pwd)/mounts" "$(pwd)/mounts"
@@ -69,19 +31,20 @@ sudo mount --bind "$(pwd)/data" "$(pwd)/data"
 sudo mount --make-rshared "$(pwd)/data"
 findmnt -T "$(pwd)/mounts" -o TARGET,PROPAGATION
 findmnt -T "$(pwd)/data" -o TARGET,PROPAGATION
+
 docker compose config
 docker compose up -d --build
 docker compose ps
 curl -fsS http://127.0.0.1:8080/api/health
 ```
 
-For mount propagation, **these bind mounts are not persistent across reboot**. Arrange persistent mount points/propagation as described in [Operations guide](docs/OPERATIONS.md) before relying on automatic restart. Avoid blindly adding duplicate bind mounts if these paths are already dedicated shared mounts. The container needs the host's `/dev/fuse`, and ports 8080/139/445/111/2049/20048 must not conflict with other services. NFS exports may not work through Docker bridge networking on every host.
+For mount propagation, **these bind mounts are not persistent across reboot**. Arrange persistent mount points/propagation as described in [Operations guide](docs/OPERATIONS.md) before relying on automatic restart. Avoid blindly adding duplicate bind mounts if these paths are already dedicated shared mounts. The container needs the host's `/dev/fuse`, and ports 8080/139/445/111/2049/20048 must not conflict with other services. NFS exports may not work through Docker bridge networking on every host. Restrict the management UI and file-sharing ports with the host firewall.
 
-Restrict the management UI and file-sharing ports with the host firewall. Open `http://HOST_IP:8080` and sign in using the credentials set in `.env`. If behind an HTTPS reverse proxy, set `PACKMOUNT_SECURE_COOKIE=true` and test the login flow.
+Open `http://HOST_IP:8080` and sign in using the credentials set in `.env`. If behind an HTTPS reverse proxy, set `PACKMOUNT_SECURE_COOKIE=true` and test the login flow.
 
 ### Install using a published image instead of building locally
 
-After cloning, preparing `.env`, making the directories and arranging mount propagation as above, set `PACKMOUNT_IMAGE=d0sn/packmount:1.3.0` in `.env` for the Docker Hub image (or select a suitable published GHCR image). Then:
+After cloning, preparing `.env`, making the directories and arranging mount propagation as above, set `PACKMOUNT_IMAGE=dosenthegit/packmount:latest` in `.env` (or use `ghcr.io/dosenthegit/packmount:latest`). Then:
 
 ```bash
 docker compose -f docker-compose.ghcr.yml config
@@ -91,7 +54,7 @@ docker compose -f docker-compose.ghcr.yml ps
 curl -fsS http://127.0.0.1:8080/api/health
 ```
 
-Published images must be accessible to the host; use a versioned tag when possible instead of `latest`. The historic filename `docker-compose.ghcr.yml` can also be used for Docker Hub images.
+Docker Hub images are public only if their repository is public; GHCR images also require **public package visibility** or a login with read permission. Prefer a numbered release tag for reproducibility, rather than `latest`.
 
 ## Add an archive source
 
@@ -140,6 +103,15 @@ See [Operations guide](docs/OPERATIONS.md) and [Changes](CHANGELOG.md).
 
 ## Important limitations
 
-The container needs elevated privileges and cannot sandbox malicious paths as strongly as an unprivileged service. Local source and export configuration should only be given to trusted admins. `rar2fs` doesn't manage encrypted archive passwords in the UI. Passwords for remote SMB mounts are encrypted in SQLite, but the Fernet key is **stored in `/config` on the same host**; secure and back up that directory.
+The container needs elevated privileges and cannot sandbox malicious paths as strongly as an unprivileged service. Local source and export configuration should only be given to trusted admins. `rar2fs` doesn't manage encrypted archive passwords in the UI. Passwords for remote SMB mounts are encrypted in SQLite, but the Fernet key is **stored in `/config` on the same host**; secure and back up that directory. This release is statically validated but **not integration-tested with actual FUSE/NFS/SMB mounts in Docker**.
 
-This release is statically validated but **not integration-tested with actual FUSE/NFS/SMB mounts in Docker**.
+The supplied `docker-compose.ghcr.yml` accepts **either Docker Hub or GHCR** despite its historical filename. Run the same setup for mount propagation described under Installation, then:
+
+```bash
+docker compose -f docker-compose.ghcr.yml config
+docker compose -f docker-compose.ghcr.yml pull
+docker compose -f docker-compose.ghcr.yml up -d --no-build
+docker compose -f docker-compose.ghcr.yml ps
+```
+
+To upgrade an existing deployment, see [Operations guide](docs/OPERATIONS.md). `docker compose up -d --build` is only for the source-build Compose file; it is not needed for a prebuilt image.
