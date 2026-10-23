@@ -41,3 +41,5 @@ Python syntax and shell syntax validated. Docker image build and kernel mount in
 - Added an Actions workflow to publish amd64 container images to GitHub Container Registry on pushes and manual dispatch.
 - Added `latest`, git-SHA and semantic-version container tags.
 - Added `docker-compose.ghcr.yml` and documented how to pull/run without a local build.
+## Packaging refresh
+- Updated docs/mockup.png to match the simplified sidebar (Overview, Settings, Logs only).
