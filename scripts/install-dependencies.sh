@@ -7,7 +7,6 @@ log() { printf '\n[PackMount] %s\n' "$*"; }
 warn() { printf '[WARNING] %s\n' "$*" >&2; }
 die() { printf '[ERROR] %s\n' "$*" >&2; exit 1; }
 
-[[ $(id -u) -eq 0 ]] || die 'Run with sudo or as root.'
 [[ $(uname -s) == Linux ]] || die 'Only Linux hosts are supported.'
 [[ -f /etc/os-release ]] || die 'Cannot identify distribution.'
 # shellcheck disable=SC1091
@@ -26,10 +25,11 @@ for arg in "$@"; do
     --disable-host-rpcbind) DISABLE_RPC=1 ;;
     -h|--help)
       cat <<'HELP'
-Usage: sudo ./install-packmount-deps.sh [--check-only | --disable-host-rpcbind]
-  --check-only             Inspect host, mounts and ports; install nothing.
+Usage: sudo bash scripts/install-dependencies.sh [--check-only | --disable-host-rpcbind]
+  --check-only             Inspect host NFS usage, ports, FUSE and Docker; install nothing.
   --disable-host-rpcbind   Explicitly stop/disable systemd rpcbind service/socket
                            ONLY if no host NFS mounts or NFS server are detected.
+  -h, --help               Show this help text.
 The option to disable rpcbind is explicit and requires manual confirmation.
 Do not disable rpcbind when NFSv3 or other RPC services rely on it.
 HELP
@@ -38,6 +38,7 @@ HELP
   esac
 done
 (( CHECK_ONLY == 0 || DISABLE_RPC == 0 )) || die 'Choose one action at a time.'
+[[ $(id -u) -eq 0 ]] || die 'Run with sudo or as root.'
 
 host_nfs_in_use() {
   if has findmnt && [[ -n "$(findmnt -rn -t nfs,nfs4 -o TARGET 2>/dev/null || true)" ]]; then
