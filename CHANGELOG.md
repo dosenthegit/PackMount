@@ -1,3 +1,8 @@
+## Documentation and installer help refresh (2026-10-24)
+
+- Document `scripts/install-dependencies.sh` in README, including check-only, installation and opt-in rpcbind actions.
+- Fix the installer `--help` usage path and allow `--help` without root; no change to installation behavior.
+
 ### Interface cleanup (2026-10-23)
 - Removed inactive Sources, Mounts and Shares links from the sidebar.
 - Kept source, mount and sharing panels on the Overview dashboard.

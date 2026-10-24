@@ -11,9 +11,32 @@ PackMount is a Linux/Docker web UI for presenting RAR archive contents with `rar
 - **Ports:** TCP 8080 for UI; TCP 139/445 for SMB; TCP/UDP 111, 2049, 20048 for NFSv3-style services. Expose only the services you need, and firewall access to trusted subnets. Note that NFS kernel services and port publishing may depend on host configuration.
 - Compose uses Docker bridge networking. FUSE propagation and kernel NFS export accessibility can differ by host; **NFS exports are not guaranteed to work behind Docker bridge/NAT**. For NFS production deployment, verify the host kernel, network topology and firewall before use.
 
+## Host dependencies (optional preparation step)
+
+The host setup helper [`scripts/install-dependencies.sh`](scripts/install-dependencies.sh) is **still supported**. It is intended for a **Linux host**, not for execution inside the PackMount Docker container. Run it on a fresh server or when checking missing prerequisites; it is **not needed for normal image updates** if the host is already configured. It supports Ubuntu/Debian, Fedora/RHEL-family and Alpine (package availability varies).
+
+After cloning this repository, inspect the available options and run read-only checks:
+
+```bash
+bash scripts/install-dependencies.sh --help
+sudo bash scripts/install-dependencies.sh --check-only
+```
+
+On a new host, install required utilities and Docker Engine/Compose v2 if absent:
+
+```bash
+sudo bash scripts/install-dependencies.sh
+```
+
+The script installs host-side Git, FUSE/CIFS/NFS client tools and Docker components when needed, checks ports 111/2049 and `/dev/fuse`, and attempts to enable Docker. It does **not** deploy PackMount, create persistent `rshared` mounts, configure your `.env`, or guarantee that the host supports all required kernel facilities. Review its output before starting Compose. It may change system packages/services; use `--check-only` first on existing systems.
+
+If port 111 conflicts with the host's `rpcbind`, investigate before changing anything. An **advanced, optional** `--disable-host-rpcbind` mode requires interactive confirmation and refuses when it detects existing NFS use. Never use this mode on hosts that depend on NFS/RPC services.
+
+For installation, continue with the source-build steps below or the published-image section. For an existing installation, see **Updating PackMount**; the dependency helper and [`scripts/update.sh`](scripts/update.sh) serve different purposes.
+
 ## Installation (build from GitHub source)
 
-Run on a **Linux Docker host** (not Docker Desktop). Install Git, Docker Engine and Docker Compose v2 first. Check that `/dev/fuse` exists. The host must support the applicable CIFS/NFS/FUSE kernel features.
+Run on a **Linux Docker host** (not Docker Desktop). Install Git first, then optionally run the host dependency helper above to provision Docker Engine and Docker Compose v2. Check that `/dev/fuse` exists. The host must support the applicable CIFS/NFS/FUSE kernel features.
 
 ```bash
 git clone https://github.com/dosenthegit/PackMount.git packmount
