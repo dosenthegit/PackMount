@@ -7,6 +7,9 @@ on:
     tags:
       - 'v*'
   workflow_dispatch:
+  # Sundays 03:00 UTC: refresh base image and package layers.
+  schedule:
+    - cron: "0 3 * * 0"
 
 permissions:
   contents: read
@@ -77,6 +80,9 @@ jobs:
           file: ./Dockerfile
           platforms: linux/amd64
           push: true
+          # Always check upstream base image; bypass cached layers on weekly runs.
+          pull: true
+          no-cache: ${{ github.event_name == 'schedule' }}
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha
