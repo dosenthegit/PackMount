@@ -79,6 +79,17 @@ curl -fsS http://127.0.0.1:8080/api/health
 
 Docker Hub images are public only if their repository is public; GHCR images also require **public package visibility** or a login with read permission. Prefer a numbered release tag for reproducibility, rather than `latest`.
 
+## Automated image rebuilds and dependency updates
+
+GitHub Actions [Build and publish Docker images](.github/workflows/docker-publish.yml) publishes **both** `d0sn/packmount` on Docker Hub and `ghcr.io/dosenthegit/packmount` on GHCR. The workflow runs on pushes to `main`, on `v*` tags, on manual **Run workflow** requests, and **every Sunday at 03:00 UTC** (04:00 Swedish winter time / 05:00 summer time).
+
+- **Push/manual/tag builds:** Docker Buildx checks for an updated base image (`pull: true`) and uses the GitHub Actions layer cache for speed.
+- **Weekly scheduled builds:** run with `pull: true` and `no-cache: true`; Dockerfile commands are re-executed and applicable repository packages can refresh. This does **not** automatically bump pinned versions of rar2fs, UnRAR or Python dependencies constrained to a fixed version, and does not guarantee that every component is fully up to date.
+- The build publishes new images; it **does not restart an installed PackMount**. To install a published image on your server, use `./scripts/update.sh` during a planned maintenance window (image-based installations only). Active FUSE/SMB/NFS operations may be interrupted when the container is recreated.
+- The workflow needs repository secrets `DOCKERHUB_USERNAME` (Docker Hub account `d0sn`) and `DOCKERHUB_TOKEN`, plus permission to publish packages to GHCR. README is synced to Docker Hub on `main` builds, including the scheduled rebuild.
+
+Review the Actions run regularly for build failures or upstream breaking changes. For predictable production deployments prefer a fixed version tag or image digest rather than automatically deploying `latest`.
+
 ## Updating PackMount (published Docker images)
 
 For a production installation, use a **specific version tag** (`d0sn/packmount:1.3.0`) when available rather than `latest`. For an installation tracking `latest`, the following pulls the newest image. Updating always restarts the container and may interrupt SMB/NFS clients and active FUSE mounts; schedule maintenance accordingly.

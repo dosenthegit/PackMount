@@ -1,3 +1,9 @@
+## Automated weekly Docker rebuild (2026-10-27)
+
+- Schedule GitHub Actions publication for Sundays at 03:00 UTC.
+- Always pull updated base images; scheduled builds bypass Docker layer cache to rerun dependency installation.
+- Document rebuild limits, registry publication, and controlled server updates.
+
 ## Documentation and installer help refresh (2026-10-24)
 
 - Document `scripts/install-dependencies.sh` in README, including check-only, installation and opt-in rpcbind actions.
